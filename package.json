@@ -1,0 +1,20 @@
+{
+  "name": "may-challenge",
+  "version": "1.0.0",
+  "description": "Petit Train — Sandbox 3D",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.5"
+  }
+}
