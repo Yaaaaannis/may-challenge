@@ -44,8 +44,12 @@ export interface Segment {
 }
 
 export interface SwitchData {
-  fnB: CurveFn
+  fnB:     CurveFn
   forkPos: { x: number; z: number; y: number }
+  // Raw segments for serialisation (Supabase payload)
+  prefix:  Segment[]
+  pathA:   Segment[]
+  pathB:   Segment[]
 }
 
 // ── Géométrie d'un segment ────────────────────────────────────────────────────
@@ -290,10 +294,13 @@ export class TrackEditor {
 
     if (this._hasFork && this._phase === 'pathB') {
       this._pathB = [...this.segments]
-      const fnA = buildCustomCurveFn([...this._prefix, ...this._pathA])
-      const fnB = buildCustomCurveFn([...this._prefix, ...this._pathB])
+      const prefix  = [...this._prefix]
+      const pathA   = [...this._pathA]
+      const pathB   = [...this._pathB]
+      const fnA     = buildCustomCurveFn([...prefix, ...pathA])
+      const fnB     = buildCustomCurveFn([...prefix, ...pathB])
       const forkPos = { x: this._forkState!.x, z: this._forkState!.z, y: this._forkState!.y }
-      this.onComplete?.(fnA, [...this._prefix, ...this._pathA], { fnB, forkPos }, signalTs)
+      this.onComplete?.(fnA, [...prefix, ...pathA], { fnB, forkPos, prefix, pathA, pathB }, signalTs)
     } else if (this._hasFork && this._phase === 'pathA') {
       this._pathA = [...this.segments]
       const fnA = buildCustomCurveFn([...this._prefix, ...this._pathA])

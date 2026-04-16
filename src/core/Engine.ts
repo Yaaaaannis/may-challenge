@@ -11,15 +11,17 @@ export class Engine {
   readonly camera: THREE.PerspectiveCamera
   readonly controls: OrbitControls
 
-  private _onTick: ((dt: number) => void) | null = null
+  private _onTick:        ((dt: number) => void) | null = null
+  private _onPostRender:  ((renderer: THREE.WebGLRenderer, scene: THREE.Scene) => void) | null = null
   private _lastTime = 0
   private _rafId = 0
-  private _composer: EffectComposer
-  private _bloom: UnrealBloomPass
+  private _composer:   EffectComposer
+  private _renderPass: RenderPass
+  private _bloom:      UnrealBloomPass
 
   constructor() {
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true })
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.shadowMap.enabled = true
@@ -52,7 +54,8 @@ export class Engine {
 
     // ── Post-processing ───────────────────────────────────────────────────────
     this._composer = new EffectComposer(this.renderer)
-    this._composer.addPass(new RenderPass(this.scene, this.camera))
+    this._renderPass = new RenderPass(this.scene, this.camera)
+    this._composer.addPass(this._renderPass)
 
     this._bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
@@ -79,6 +82,23 @@ export class Engine {
     this._onTick = fn
   }
 
+  /** Register a callback called after the main composer render — for PiP/overlay renders. */
+  setPostRenderCallback(fn: (renderer: THREE.WebGLRenderer, scene: THREE.Scene) => void) {
+    this._onPostRender = fn
+  }
+
+  /** Remplace la caméra utilisée par le composer. Passer null pour revenir à la caméra principale. */
+  setActiveCamera(cam: THREE.PerspectiveCamera | null) {
+    this._renderPass.camera = cam ?? this.camera
+  }
+
+  /** Remet la caméra principale à sa position de départ. */
+  resetCamera() {
+    this.camera.position.set(0, 8, 14)
+    this.controls.target.set(0, 0, 0)
+    this.controls.update()
+  }
+
   start() {
     this._rafId = requestAnimationFrame(this._loop)
   }
@@ -95,6 +115,7 @@ export class Engine {
     this.controls.update()
     this._onTick?.(dt)
     this._composer.render()
+    this._onPostRender?.(this.renderer, this.scene)
   }
 
   /** Déplace la caméra + target (pan relatif à la direction horizontale de vue). */

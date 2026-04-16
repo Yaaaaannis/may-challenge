@@ -13,11 +13,17 @@ export interface InputCallbacks {
 }
 
 export class InputHandler {
-  private _held = new Set<string>()
+  private _held    = new Set<string>()
+  private _enabled = true
 
   constructor(private callbacks: InputCallbacks) {
     window.addEventListener('keydown', this._onKeyDown)
     window.addEventListener('keyup',   this._onKeyUp)
+  }
+
+  setEnabled(v: boolean) {
+    this._enabled = v
+    if (!v) this._held.clear()
   }
 
   // ── Touches maintenues (caméra) ───────────────────────────────────────────
@@ -34,7 +40,8 @@ export class InputHandler {
   // ── Événements clavier ────────────────────────────────────────────────────
 
   private _onKeyDown = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement) return
+    if (!this._enabled) return
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
     // Touches maintenues (mouvements caméra)
     const cam = ['z', 'w', 'q', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
@@ -60,6 +67,7 @@ export class InputHandler {
   }
 
   private _onKeyUp = (e: KeyboardEvent) => {
+    if (!this._enabled) return
     this._held.delete(e.key)
   }
 

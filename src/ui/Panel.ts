@@ -18,6 +18,9 @@ export interface PanelCallbacks {
   onSeason:   (id: string) => void
   onTunnel:   (active: boolean) => void
   onBridge:   (active: boolean) => void
+  onShare?:    () => void
+  onBrowse?:   () => void
+  onTrainCam?: () => void
 }
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -119,8 +122,9 @@ export class Panel {
   private biomeBtns: HTMLButtonElement[] = []
   private weatherBtns: HTMLButtonElement[] = []
   private seasonBtns:  HTMLButtonElement[] = []
-  private tunnelBtn!:  HTMLButtonElement
-  private bridgeBtn!:  HTMLButtonElement
+  private tunnelBtn!:    HTMLButtonElement
+  private bridgeBtn!:    HTMLButtonElement
+  private trainCamBtn!:  HTMLButtonElement
   private _collapsed = false
 
   constructor(private callbacks: PanelCallbacks) {
@@ -139,6 +143,7 @@ export class Panel {
     this.seasonBtns  = Array.from(this.el.querySelectorAll('[data-season]'))
     this.tunnelBtn   = this.el.querySelector('[data-tunnel]')!
     this.bridgeBtn   = this.el.querySelector('[data-bridge]')!
+    this.trainCamBtn = this.el.querySelector('[data-traincam]')!
     this._bindEvents()
     document.body.appendChild(this.el)
   }
@@ -197,6 +202,33 @@ export class Panel {
 
       <div class="tp-divider"></div>
 
+      <section class="tp-section">
+        <div style="font-size:9px;font-weight:600;letter-spacing:1px;
+          color:${C.muted};text-transform:uppercase;margin-bottom:6px">
+          Communauté</div>
+        <div class="tp-row tp-row-2">
+          <button class="tp-icon-btn" data-share style="--c:${C.blue}" title="Partager ce circuit">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="13" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="3"  cy="8" r="2" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="13" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="5" y1="7" x2="11" y2="4" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="5" y1="9" x2="11" y2="12" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span>Partager</span>
+          </button>
+          <button class="tp-icon-btn" data-browse style="--c:${C.green}" title="Explorer les circuits">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="6.5" cy="6.5" r="4" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span>Explorer</span>
+          </button>
+        </div>
+      </section>
+
+      <div class="tp-divider"></div>
+
       <section class="tp-section tp-modes">
         <button class="tp-mode-btn" data-pause style="--c:${C.yellow};--ct:#2d2320" title="Pause (P)">
           <span data-pause-icon>${ICONS.pause}</span>
@@ -205,8 +237,15 @@ export class Panel {
         <button class="tp-mode-btn" data-fist  style="--c:${C.red}"    title="Mode Poing (H)">
           ${ICONS.fist}<span>Mode Poing</span>
         </button>
-        <button class="tp-mode-btn" data-grab  style="--c:${C.blue}"   title="Mode Grab (G)">
+        <button class="tp-mode-btn" data-grab     style="--c:${C.blue}"   title="Mode Grab (G)">
           ${ICONS.grab}<span>Mode Grab</span>
+        </button>
+        <button class="tp-mode-btn" data-traincam style="--c:#4cc9f0;--ct:#0a1a2a" title="Vue caméra du train">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="4" width="10" height="8" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M11 6.5 L15 4.5 L15 11.5 L11 9.5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <span>Vue Train</span>
         </button>
       </section>
 
@@ -315,6 +354,8 @@ export class Panel {
     q('[data-whistle]')!.addEventListener('click', () => this.callbacks.onWhistle())
     q('[data-night]')!.addEventListener('click', () => this.callbacks.onNightToggle())
     q('[data-reset]')!.addEventListener('click', () => this.callbacks.onReset())
+    q('[data-share]')?.addEventListener('click', () => this.callbacks.onShare?.())
+    q('[data-browse]')?.addEventListener('click', () => this.callbacks.onBrowse?.())
     q('[data-pause]')!.addEventListener('click', () => this.callbacks.onPauseToggle())
     q('[data-fist]')!.addEventListener('click', () => this.callbacks.onFistToggle())
     q('[data-grab]')!.addEventListener('click', () => this.callbacks.onGrabToggle())
@@ -369,6 +410,10 @@ export class Panel {
     q('[data-bridge]')!.addEventListener('click', () => {
       const active = this.bridgeBtn.classList.toggle('active')
       this.callbacks.onBridge(active)
+    })
+
+    q('[data-traincam]')!.addEventListener('click', () => {
+      this.callbacks.onTrainCam?.()
     })
 
     // Collapse toggle
@@ -539,6 +584,7 @@ export class Panel {
       /* Row helpers */
       .tp-row { display: flex; gap: 5px; }
       .tp-row-3 > * { flex: 1; }
+      .tp-row-2 > * { flex: 1; }
 
       /* Circuit grid — 2 columns, auto-rows */
       .tp-circuit-grid {
@@ -704,6 +750,10 @@ export class Panel {
 
   setGrabActive(active: boolean) {
     this.grabBtn.classList.toggle('active', active)
+  }
+
+  setTrainCamActive(active: boolean) {
+    this.trainCamBtn.classList.toggle('active', active)
   }
 
   setPaused(paused: boolean) {

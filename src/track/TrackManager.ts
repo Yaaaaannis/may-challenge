@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import { CIRCUITS, TrackCircuit, CurveFn } from './curves.js'
 import { buildTrack, cloneGroupMaterials, setGroupOpacity, disposeGroup } from './TrackBuilder.js'
-import { SwitchData } from './TrackEditor.js'
+import { SwitchData, Segment } from './TrackEditor.js'
 import { TwoSwitchPreset, createTwoSwitchPreset } from './presets.js'
+import type { CircuitPayload } from '../supabase/types.js'
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -36,6 +37,9 @@ export class TrackManager {
   private _multi: MultiMode | null = null
   private _activeCurveFn: CurveFn | null = null   // cached resolved fn
 
+  /** Serialisable representation of the current circuit — ready for Supabase. */
+  private _payload: CircuitPayload = { kind: 'preset', index: 0 }
+
   constructor(scene: THREE.Scene) {
     this.scene = scene
   }
@@ -44,6 +48,8 @@ export class TrackManager {
 
   get circuitIndex() { return this._circuitIndex }
   get circuit(): TrackCircuit { return CIRCUITS[this._circuitIndex] }
+  /** Current circuit as a JSON-serialisable payload. */
+  get currentPayload(): CircuitPayload { return this._payload }
 
   /** Show or hide all current track geometry (e.g. while the editor is open). */
   setVisible(visible: boolean) {
@@ -86,13 +92,15 @@ export class TrackManager {
     this._customFn      = null
     this._circuitIndex  = index
     this._activeCurveFn = null
+    this._payload       = { kind: 'preset', index }
     this._clearMulti()
     this._buildSingleTrack(index)
   }
 
-  setCustomTrack(fn: CurveFn) {
+  setCustomTrack(fn: CurveFn, segments: Segment[] = []) {
     this._customFn      = fn
     this._activeCurveFn = null
+    this._payload       = { kind: 'simple', segments }
     this._clearMulti()
     this._buildFromFn(fn)
   }
@@ -131,6 +139,13 @@ export class TrackManager {
       resolveFn: ([s0]) => s0 === 'A' ? fnA : switchData.fnB,
     }
     this._activeCurveFn = fnA
+    this._payload = {
+      kind: 'switch',
+      prefix:  switchData.prefix  ?? [],
+      pathA:   switchData.pathA   ?? [],
+      pathB:   switchData.pathB   ?? [],
+      forkPos: switchData.forkPos,
+    }
   }
 
   // ── Two-switch preset ─────────────────────────────────────────────────────
@@ -166,6 +181,7 @@ export class TrackManager {
       resolveFn: ([s0, s1]) => fnMap[`${s0}${s1}`],
     }
     this._activeCurveFn = preset.fnAA
+    this._payload = { kind: 'preset', index: -1 }  // two-switch preset has no index
   }
 
   // ── Toggle a switch ───────────────────────────────────────────────────────

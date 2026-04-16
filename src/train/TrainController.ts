@@ -95,7 +95,7 @@ export class TrainController {
 
     const tNew = ((this._rawAngle / (2 * Math.PI)) % 1 + 1) % 1
 
-    if (!this.locoOffRail) this.loco.update(fn, tNew)
+    if (!this.locoOffRail) this.loco.update(fn, tNew, this.wheelRot)
 
     if (this._arcTable) {
       const locoS = this._arcTable.tToS(tNew)

@@ -26,6 +26,12 @@ import { Minimap } from '../ui/Minimap.js'
 import { SpeedGauge } from '../ui/SpeedGauge.js'
 import { StationManager } from '../environment/StationManager.js'
 import { ScoreBoard } from '../ui/ScoreBoard.js'
+import { ShareModal } from '../ui/ShareModal.js'
+import { BrowseModal } from '../ui/BrowseModal.js'
+import { TrainCam } from '../train/TrainCam.js'
+import { isConfigured } from '../supabase/client.js'
+import { buildCustomCurveFn } from '../track/TrackEditor.js'
+import type { CircuitPayload } from '../supabase/types.js'
 
 const SPEED_STEP = 0.15
 const SPEED_MIN  = 0.05
@@ -61,6 +67,9 @@ export class World {
   private speedGauge!: SpeedGauge
   private stations!:   StationManager
   private scoreboard!: ScoreBoard
+  private shareModal!:  ShareModal
+  private browseModal!: BrowseModal
+  private trainCam!:    TrainCam
 
   // Derail risk metrics — updated every tick by _checkCentrifugalDerail
   private _derailRisk    = 0
@@ -71,6 +80,7 @@ export class World {
   private _dbgTerrainMaxH  = 3.2
   private _dbgTerrainFlatR = 9.5
   private _dbgTerrainHillR = 18.0
+  private _trainCamActive  = false
   private editor:   TrackEditor | null = null
 
   // Switch raycasting
@@ -122,10 +132,16 @@ export class World {
       this.panel.setSpeed(v)
     }
 
-    this.stations  = new StationManager(this.engine.scene)
+    this.stations   = new StationManager(this.engine.scene)
     this.scoreboard = new ScoreBoard()
     this._buildStations(this.track.curveFn)
 
+    this.trainCam    = new TrainCam()
+    this.shareModal  = new ShareModal()
+    this.shareModal.onClose = () => { this.engine.controls.enabled = true; this.input.setEnabled(true) }
+    this.browseModal = new BrowseModal()
+    this.browseModal.onLoad = (payload) => this._loadCircuitPayload(payload)
+    this.browseModal.onClose = () => { this.engine.controls.enabled = true; this.input.setEnabled(true) }
 
     this._buildUI()
     this._buildDebugConsole()
@@ -235,6 +251,9 @@ export class World {
       onSeason:       (id: string)   => this._setSeason(id as SeasonId),
       onTunnel:       (active: boolean) => this._toggleTunnel(active),
       onBridge:       (active: boolean) => this._toggleBridge(active),
+      onShare:        () => this._shareCircuit(),
+      onBrowse:       () => { this.engine.controls.enabled = false; this.input.setEnabled(false); this.browseModal.open() },
+      onTrainCam:     () => this._toggleTrainCam(),
     })
   }
 
@@ -271,7 +290,18 @@ export class World {
       this.train.update(this.track.curveFn, dt, Math.min(signalBrake, stationBrake) * emergencyBrake)
       this.weather.update(dt)
       this.train.locomotive.group.getWorldPosition(this._locoPos)
-      this.smoke.update(dt, this._locoPos, this.train.speed)
+      // Répulseurs : cheminées (petit rayon — évite l'entrée dans le cylindre)
+      //              + corps des véhicules (rayon plus large)
+      const chimneyPos  = this.train.locomotive.getChimneyPositions()
+      const bodyRepellers = this.train.locomotive.getBodyRepellers()
+        .map(r => ({ pos: r.pos, radius: r.radius * 2.0 }))   // rayon doublé pour couvrir la surface visible
+      const repellers = [
+        ...chimneyPos.map(pos => ({ pos, radius: 0.32 })),
+        ...bodyRepellers,
+        ...this.train.getVehicleData().map(v => ({ pos: v.pos, radius: 0.75 })),
+      ]
+      this.smoke.update(dt, this._locoPos, this.train.speed, chimneyPos, repellers)
+      if (this._trainCamActive) this.trainCam.update(this.train.locomotive.group)
       if (this._bridgeActive) this.bridge.update(dt)
 
       // ── Shadow camera follows the train ──────────────────────────────────
@@ -495,7 +525,7 @@ export class World {
       if (switchData) {
         this.track.setCustomTrackWithSwitch(fn, switchData)
       } else {
-        this.track.setCustomTrack(fn)
+        this.track.setCustomTrack(fn, _segs)
       }
 
       this.track.setVisible(true)
@@ -610,6 +640,53 @@ export class World {
     }
   }
 
+  // ── Circuit sharing ───────────────────────────────────────────────────────
+
+  private _shareCircuit() {
+    if (!isConfigured()) {
+      alert('Supabase non configuré.\nAjoute VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env')
+      return
+    }
+    this.engine.controls.enabled = false
+    this.input.setEnabled(false)
+    const payload    = this.track.currentPayload
+    const previewUrl = this.engine.renderer.domElement.toDataURL('image/jpeg', 0.82)
+    this.shareModal.open(payload, previewUrl)
+  }
+
+  private _loadCircuitPayload(payload: CircuitPayload) {
+    if (payload.kind === 'preset') {
+      if (payload.index === -1) {
+        this._loadTwoSwitchPreset()
+      } else {
+        this._switchCircuit(payload.index)
+        this.panel.setActiveCircuit(payload.index)
+      }
+      return
+    }
+
+    if (payload.kind === 'simple') {
+      const fn = buildCustomCurveFn(payload.segments)
+      this.track.setCustomTrack(fn, payload.segments)
+    } else {
+      // 'switch'
+      const { prefix, pathA, pathB, forkPos } = payload
+      const fnA = buildCustomCurveFn([...prefix, ...pathA])
+      const fnB = buildCustomCurveFn([...prefix, ...pathB])
+      this.track.setCustomTrackWithSwitch(fnA, { fnB, forkPos, prefix, pathA, pathB })
+    }
+
+    const fn = this.track.curveFn
+    this.lamps.build(fn)
+    this.lamps.setNightMode(this.dayNight.isNight)
+    this.signals.clear()
+    this.minimap.buildTrack(fn)
+    this.train.rebuildWagonOffsets(fn)
+    this.train.reset()
+    this._buildStations(fn)
+    this.terrain.rebuild(this._dbgTerrainMaxH, this._dbgTerrainFlatR, this._dbgTerrainHillR)
+  }
+
   // ── Stations ─────────────────────────────────────────────────────────────
 
   private _buildStations(fn: CurveFn) {
@@ -702,6 +779,19 @@ export class World {
     this._safeSpeedFrac = Math.min(minSafeSpeedT / SPEED_MAX, 1.0)
   }
 
+  private _toggleTrainCam() {
+    this._trainCamActive = !this._trainCamActive
+    this.panel.setTrainCamActive(this._trainCamActive)
+    if (this._trainCamActive) {
+      this.engine.setActiveCamera(this.trainCam.camera)
+      this.engine.controls.enabled = false
+    } else {
+      this.engine.setActiveCamera(null)
+      this.engine.resetCamera()
+      this.engine.controls.enabled = true
+    }
+  }
+
   // ── Dispose ───────────────────────────────────────────────────────────────
 
   dispose() {
@@ -729,5 +819,8 @@ export class World {
     this.speedGauge.dispose()
     this.stations.dispose()
     this.scoreboard.dispose()
+    this.shareModal.dispose()
+    this.browseModal.dispose()
+    this.trainCam.dispose()
   }
 }
