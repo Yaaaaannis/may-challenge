@@ -5,6 +5,7 @@ import { CurveFn, findNearestT, curvePoint } from './curves.js'
 
 const STRAIGHT_LEN  = 2.5
 const CURVE_RADIUS  = 2.5
+const LOOP_RADIUS   = 2.5             // radius of loop-the-loop circle
 const CURVE_DTHETA  = Math.PI / 2     // virages à 90°
 const DIR_COUNT     = 4               // 0=+X  1=+Z  2=-X  3=-Z
 const CLOSE_DIST    = 0.3
@@ -21,11 +22,12 @@ const GHOST_COLORS: Record<SegType, number> = {
   'curve-right':  0xf4a261,   // orange
   'slope-up':     0xe63946,   // rouge
   'slope-down':   0x4361ee,   // bleu foncé
+  'loop':         0xee4488,   // rose cartoon
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type SegType = 'straight' | 'curve-right' | 'curve-left' | 'slope-up' | 'slope-down'
+export type SegType = 'straight' | 'curve-right' | 'curve-left' | 'slope-up' | 'slope-down' | 'loop'
 
 export interface Segment {
   type:       SegType
@@ -60,6 +62,18 @@ function ptOnSeg(seg: Segment, s: number): { x: number; y: number; z: number } {
   const endY   = seg.endY   ?? startY
   const y      = startY + (endY - startY) * (ss / seg.length)
 
+  // ── Loop-the-loop : cercle vertical dans le plan de la direction de départ ──
+  if (seg.type === 'loop') {
+    const phi = (ss / seg.length) * Math.PI * 2   // 0 → 2π (tour complet)
+    const sa  = seg.startAngle
+    const R   = seg.radius!
+    return {
+      x: seg.startX + R * Math.sin(phi) * Math.cos(sa),
+      y: startY     + R * (1 - Math.cos(phi)),
+      z: seg.startZ + R * Math.sin(phi) * Math.sin(sa),
+    }
+  }
+
   if (seg.type !== 'curve-right' && seg.type !== 'curve-left') {
     return {
       x: seg.startX + ss * Math.cos(seg.startAngle),
@@ -84,8 +98,14 @@ function sampleSeg(seg: Segment, N: number): THREE.Vector3[] {
   return pts
 }
 
+function segSampleN(seg: Segment): number {
+  if (seg.type === 'loop') return 32
+  if (seg.type === 'straight' || seg.type === 'slope-up' || seg.type === 'slope-down') return 2
+  return 16
+}
+
 function buildSegTube(seg: Segment, radius: number, mat: THREE.Material): THREE.Mesh {
-  const N    = seg.type === 'straight' || seg.type === 'slope-up' || seg.type === 'slope-down' ? 2 : 16
+  const N    = segSampleN(seg)
   const pts  = sampleSeg(seg, N)
   const curve = new THREE.CatmullRomCurve3(pts, false)
   const geo   = new THREE.TubeGeometry(curve, N, radius, 6, false)
@@ -250,6 +270,7 @@ export class TrackEditor {
   addCurveLeft()   { if (!this._closed) { this._add('curve-left');  this._afterAdd() } }
   addSlopeUp()     { if (!this._closed) { this._add('slope-up');    this._afterAdd() } }
   addSlopeDown()   { if (!this._closed) { this._add('slope-down');  this._afterAdd() } }
+  addLoop()        { if (!this._closed) { this._add('loop');        this._afterAdd() } }
 
   undo() {
     if (this.segments.length === 0) return
@@ -401,6 +422,7 @@ export class TrackEditor {
       case 'curve-right': this.addCurveRight(); break
       case 'slope-up':    this.addSlopeUp();    break
       case 'slope-down':  this.addSlopeDown();  break
+      case 'loop':        this.addLoop();       break
     }
   }
 
@@ -431,6 +453,15 @@ export class TrackEditor {
       }
     } else if (type === 'straight') {
       seg = { type, startX: x, startZ: z, startAngle: angle, length: STRAIGHT_LEN, startY: y, endY: y }
+    } else if (type === 'loop') {
+      // Boucle verticale complète (2πR) — revient à la position et direction de départ
+      const R = LOOP_RADIUS
+      seg = {
+        type, startX: x, startZ: z, startAngle: angle,
+        startY: y, endY: y,
+        length: 2 * Math.PI * R,
+        radius: R,
+      }
     } else {
       const R  = CURVE_RADIUS
       const ts = type === 'curve-right' ? -1 : 1
@@ -455,6 +486,8 @@ export class TrackEditor {
       this.state.x += seg.length * Math.cos(seg.startAngle)
       this.state.z += seg.length * Math.sin(seg.startAngle)
       this.state.y  = seg.endY ?? seg.startY ?? 0
+    } else if (seg.type === 'loop') {
+      // Le looping revient exactement à sa position/direction de départ — aucun changement d'état
     } else {
       const phi    = seg.phi0! + seg.turnSign! * seg.dtheta!
       this.state.x = seg.centerX! + seg.radius! * Math.cos(phi)
@@ -557,13 +590,15 @@ export class TrackEditor {
   }
 
   private _drawSegPreview(seg: Segment, mat: THREE.MeshStandardMaterial, tieMat: THREE.MeshStandardMaterial) {
-    const N   = (seg.type === 'straight' || seg.type === 'slope-up' || seg.type === 'slope-down') ? 2 : 16
+    const N   = segSampleN(seg)
     const pts = sampleSeg(seg, N)
     for (const side of [-1, 1]) {
       const railPts = pts.map((p, i) => {
         const pA   = pts[Math.max(0, i - 1)]
         const pB   = pts[Math.min(N, i + 1)]
         const tang = new THREE.Vector3().subVectors(pB, pA).normalize()
+        // Pour les loops : offset perpendiculaire dans le plan horizontal
+        // (le loop est vertical donc tang.z / tang.x donnent la direction latérale)
         return new THREE.Vector3(
           p.x + side * RAIL_GAUGE * tang.z, p.y,
           p.z - side * RAIL_GAUGE * tang.x,
@@ -573,17 +608,19 @@ export class TrackEditor {
       this.previewGroup.add(new THREE.Mesh(geo, mat))
     }
 
-    // Traverses
-    const tieGeo = new THREE.BoxGeometry(0.07, 0.05, 1.0)
-    const TIE_N  = Math.max(2, Math.round(seg.length / 0.6))
-    for (let i = 0; i <= TIE_N; i++) {
-      const t            = i / TIE_N
-      const { x, y, z }  = ptOnSeg(seg, t * seg.length)
-      const next         = ptOnSeg(seg, Math.min((t + 0.01), 1) * seg.length)
-      const tie          = new THREE.Mesh(tieGeo, tieMat)
-      tie.position.set(x, RAIL_Y + y - 0.05, z)
-      tie.rotation.y  = Math.atan2(next.x - x, next.z - z)
-      this.previewGroup.add(tie)
+    // Traverses (pas de traverses pour le looping — ça volerait dans les airs)
+    if (seg.type !== 'loop') {
+      const tieGeo = new THREE.BoxGeometry(0.07, 0.05, 1.0)
+      const TIE_N  = Math.max(2, Math.round(seg.length / 0.6))
+      for (let i = 0; i <= TIE_N; i++) {
+        const t            = i / TIE_N
+        const { x, y, z }  = ptOnSeg(seg, t * seg.length)
+        const next         = ptOnSeg(seg, Math.min((t + 0.01), 1) * seg.length)
+        const tie          = new THREE.Mesh(tieGeo, tieMat)
+        tie.position.set(x, RAIL_Y + y - 0.05, z)
+        tie.rotation.y  = Math.atan2(next.x - x, next.z - z)
+        this.previewGroup.add(tie)
+      }
     }
   }
 
@@ -595,7 +632,7 @@ export class TrackEditor {
 
     if (this._closed) return  // boucle fermée → plus rien à ajouter
 
-    const TYPES: SegType[] = ['curve-left', 'straight', 'curve-right', 'slope-up', 'slope-down']
+    const TYPES: SegType[] = ['curve-left', 'straight', 'curve-right', 'slope-up', 'slope-down', 'loop']
 
     for (const type of TYPES) {
       const ghost = this._computeGhostSeg(type)
@@ -609,7 +646,7 @@ export class TrackEditor {
         metalness: 0.2,
       })
 
-      const N    = (ghost.type === 'straight' || ghost.type === 'slope-up' || ghost.type === 'slope-down') ? 3 : 18
+      const N    = ghost.type === 'loop' ? 32 : (ghost.type === 'straight' || ghost.type === 'slope-up' || ghost.type === 'slope-down') ? 3 : 18
       const pts  = sampleSeg(ghost, N)
       const tube = new THREE.TubeGeometry(
         new THREE.CatmullRomCurve3(pts, false), N, GHOST_R, 7, false,
@@ -649,6 +686,15 @@ export class TrackEditor {
       return { type, startX: x, startZ: z, startAngle: angle, length: STRAIGHT_LEN, startY: y, endY: y - SLOPE_HEIGHT }
     }
 
+    if (type === 'loop') {
+      const R = LOOP_RADIUS
+      return {
+        type, startX: x, startZ: z, startAngle: angle,
+        startY: y, endY: y,
+        length: 2 * Math.PI * R, radius: R,
+      }
+    }
+
     const R  = CURVE_RADIUS
     const ts = type === 'curve-right' ? -1 : 1
     const cx = x - ts * R * Math.sin(angle)
@@ -670,6 +716,12 @@ export class TrackEditor {
       ez    = seg.startZ + seg.length * Math.sin(seg.startAngle)
       ey    = seg.endY ?? seg.startY ?? 0
       edir  = seg.startAngle
+    } else if (seg.type === 'loop') {
+      // Le looping revient au point de départ avec la même direction
+      ex   = seg.startX
+      ez   = seg.startZ
+      ey   = seg.startY ?? 0
+      edir = seg.startAngle
     } else {
       const phi = seg.phi0! + seg.turnSign! * seg.dtheta!
       ex   = seg.centerX! + seg.radius! * Math.cos(phi)
@@ -761,6 +813,14 @@ export class TrackEditor {
           <span style="font-size:18px">↘</span>
           <span>Descente</span>
         </button>
+        <button class="te-btn te-piece" data-action="loop"
+          style="--gc:#ee4488" title="Looping vertical">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <path d="M13 22 L13 17 A5 5 0 1 1 13 7 L13 4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+            <polyline points="10,6 13,3 16,6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+          </svg>
+          <span>Loop</span>
+        </button>
       </div>
       <div class="te-actions">
         <button class="te-btn te-fork" data-action="fork" title="Créer un aiguillage">
@@ -802,6 +862,7 @@ export class TrackEditor {
         case 'right':      this.addCurveRight(); break
         case 'slope-up':   this.addSlopeUp();    break
         case 'slope-down': this.addSlopeDown();  break
+        case 'loop':       this.addLoop();       break
         case 'fork':       this.fork();          break
         case 'pathb':      this.startPathB();    break
         case 'undo':       this.undo();          break

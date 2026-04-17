@@ -35,9 +35,11 @@ export const CIRCUITS: TrackCircuit[] = [
   // ── Grand Serpentin ──────────────────────────────────────────────────────────
   // Large hand-crafted loop (~40×38 units) with elevation changes.
   // Designed to accommodate 5 stations and showcase all biomes/features.
+  // Includes a vertical loop at the southern flat section (point 6).
   {
     name: 'Grand Serpentin',
     fn: (() => {
+      const LOOP_R = 2.5
       const raw: [number, number, number][] = [
         [  0,  0.0, -21 ],  //  0  North
         [  9,  0.0, -18 ],  //  1  NNE
@@ -45,7 +47,7 @@ export const CIRCUITS: TrackCircuit[] = [
         [ 21,  1.8,  -2 ],  //  3  E rise
         [ 19,  2.6,   7 ],  //  4  E peak
         [ 12,  1.2,  15 ],  //  5  SE descent
-        [  3,  0.0,  20 ],  //  6  SSE flat
+        [  3,  0.0,  20 ],  //  6  SSE flat  ← loop entry
         [ -6,  0.9,  20 ],  //  7  SSW gentle hill
         [-14,  0.0,  14 ],  //  8  SW
         [-21,  2.2,   4 ],  //  9  W hill
@@ -53,12 +55,51 @@ export const CIRCUITS: TrackCircuit[] = [
         [-16,  0.5, -14 ],  // 11  NW
         [ -7,  0.0, -20 ],  // 12  NNW
       ]
-      const pts  = raw.map(([x, y, z]) => new THREE.Vector3(x, y, z))
-      const crv  = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5)
-      return (t: number): { x: number; y: number; z: number } => {
-        const p = crv.getPoint(((t % 1) + 1) % 1)
+      const pts = raw.map(([x, y, z]) => new THREE.Vector3(x, y, z))
+      const crv = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5)
+
+      // ── Injection du looping au point 6 (3, 0, 20) ────────────────────────
+      // CatmullRom fermé sur N=13 points : point 6 est à t = 6/13.
+      const tSplit = 6 / 13
+
+      // Direction tangente du circuit à l'entrée du looping
+      const tang   = crv.getTangent(tSplit)
+      const loopSa = Math.atan2(tang.z, tang.x)   // angle dans le plan XZ
+
+      // Position exacte à l'entrée
+      const entry  = crv.getPoint(tSplit)
+
+      // Section 1 : circuit de t=0 à t=tSplit
+      const sec1: CurveFn = (t) => {
+        const p = crv.getPoint(Math.max(0, Math.min(1, t)) * tSplit)
         return { x: p.x, y: p.y, z: p.z }
       }
+
+      // Section 2 : looping vertical (2πR)
+      const loopFn: CurveFn = (t) => {
+        const phi = ((t % 1) + 1) % 1 * Math.PI * 2
+        return {
+          x: entry.x + LOOP_R * Math.sin(phi) * Math.cos(loopSa),
+          y: entry.y + LOOP_R * (1 - Math.cos(phi)),
+          z: entry.z + LOOP_R * Math.sin(phi) * Math.sin(loopSa),
+        }
+      }
+
+      // Section 3 : circuit de t=tSplit à t=1
+      const sec3: CurveFn = (t) => {
+        const p = crv.getPoint(tSplit + Math.max(0, Math.min(1, t)) * (1 - tSplit))
+        return { x: p.x, y: p.y, z: p.z }
+      }
+
+      const len1 = estimateCurveLength(sec1, 128)
+      const len2 = 2 * Math.PI * LOOP_R
+      const len3 = estimateCurveLength(sec3, 128)
+
+      return buildSectionedCurveFn([
+        { fn: sec1, len: len1 },
+        { fn: loopFn, len: len2 },
+        { fn: sec3, len: len3 },
+      ])
     })(),
   },
 ]

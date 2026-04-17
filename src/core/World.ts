@@ -81,6 +81,8 @@ export class World {
   private _dbgTerrainFlatR = 9.5
   private _dbgTerrainHillR = 18.0
   private _trainCamActive  = false
+  private _inLoopPhase     = false   // détection looping en cours
+  private _prevLoopTangY   = 0       // tang.y frame précédente
   private editor:   TrackEditor | null = null
 
   // Switch raycasting
@@ -317,6 +319,7 @@ export class World {
 
       this._checkRailCollisions()
       this._checkCentrifugalDerail()
+      this._checkLoopBoost()
       this.stations.update(this.train.t, this.train.speed, dt)
       this.scoreboard.tick(dt)
       const approach = this.stations.getNextApproach(this.train.t)
@@ -729,6 +732,16 @@ export class World {
       const DT = 0.005
       const tA = curveTangent(fn, t)
       const tB = curveTangent(fn, t + DT)
+
+      // Skip si courbure VERTICALE : dans un looping, la variation du tangent
+      // est principalement sur l'axe Y (même au bas/sommet où tA.y ≈ 0).
+      // Pour un virage horizontal, ΔtangY ≈ 0.
+      // Pour un looping, ΔtangY / |Δtang| ≈ 1.
+      const dtY  = tB.y - tA.y
+      const dtLen = tA.distanceTo(tB)
+      if (dtLen > 0.0001 && Math.abs(dtY) > dtLen * 0.40) continue
+      // Aussi ignorer si la tangente elle-même est déjà très inclinée (sommet/descente)
+      if (Math.abs(tA.y) > 0.20) continue
       const curveAngle = tA.angleTo(tB) / DT     // rad per unit-t
       // Convert to rad per world-unit → κ = curveAngle / total
       const kappa = curveAngle / table.total
@@ -777,6 +790,37 @@ export class World {
 
     this._derailRisk    = maxRisk
     this._safeSpeedFrac = Math.min(minSafeSpeedT / SPEED_MAX, 1.0)
+  }
+
+  // ── Loop-the-loop : boost auto + burst de fumée ───────────────────────────
+
+  private _checkLoopBoost() {
+    if (!this.derail) return
+    const fn   = this.track.curveFn
+    const tang = curveTangent(fn, this.train.t)
+
+    // Détecte si la loco est dans une section à courbure verticale (looping)
+    const inLoop = Math.abs(tang.y) > 0.18
+
+    if (inLoop && this.train.speed > 0.01) {
+      // Cartoon : vitesse minimale garantie dans le looping (le train ne retombe pas)
+      const MIN_LOOP_SPEED = 0.70
+      if (this.train.speed < MIN_LOOP_SPEED) {
+        this.train.speed = MIN_LOOP_SPEED
+        this.panel.setSpeed(MIN_LOOP_SPEED)
+        this.speedGauge?.setLeverSpeed(MIN_LOOP_SPEED)
+      }
+    }
+
+    // Détection de la sortie de looping (tang.y était négatif → retour à ~0)
+    // = train revient au bas du cercle après être passé par le sommet inversé
+    const loopComplete = this._inLoopPhase && !inLoop && this._prevLoopTangY < -0.12
+    if (loopComplete) {
+      this.smoke.triggerBurst(3.5)   // grosse bouffée de fumée cartoon !
+    }
+
+    this._inLoopPhase   = inLoop
+    this._prevLoopTangY = tang.y
   }
 
   private _toggleTrainCam() {

@@ -40,6 +40,11 @@ export class SmokeSystem {
   setRiseSpeed(v: number)    { this._riseMult = v }
   setPuffSize(v: number)     { this._sizeMult = v }
 
+  /** Déclenche un burst de fumée (ex : sortie de looping). */
+  triggerBurst(energy: number) {
+    this._burstEnergy = Math.min(this._burstEnergy + energy, 6.0)
+  }
+
   constructor(scene: THREE.Scene) {
     this.scene = scene
 
