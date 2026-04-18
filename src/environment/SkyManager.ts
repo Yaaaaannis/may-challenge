@@ -58,6 +58,22 @@ export class SkyManager {
     if (!this._night) this._updateSun(elevation)
   }
 
+  /** Génère un env map IBL depuis le ciel procédural via CubeCamera + PMREMGenerator. */
+  generateEnvMap(renderer: THREE.WebGLRenderer, scene: THREE.Scene): THREE.Texture {
+    const cubeRT = new THREE.WebGLCubeRenderTarget(128)
+    cubeRT.texture.type = THREE.HalfFloatType
+    const cubeCamera = new THREE.CubeCamera(0.01, 1000, cubeRT)
+    cubeCamera.position.set(0, 5, 0)
+    scene.add(cubeCamera)
+    cubeCamera.update(renderer, scene)
+    scene.remove(cubeCamera)
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    const envMap = pmrem.fromCubemap(cubeRT.texture)
+    pmrem.dispose()
+    cubeRT.dispose()
+    return envMap.texture
+  }
+
   dispose() {
     this.scene.remove(this._sky)
     this._sky.geometry.dispose()

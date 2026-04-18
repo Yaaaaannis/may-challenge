@@ -39,7 +39,7 @@ export const CIRCUITS: TrackCircuit[] = [
   {
     name: 'Grand Serpentin',
     fn: (() => {
-      const LOOP_R = 2.5
+      const LOOP_R = 4.0
       const raw: [number, number, number][] = [
         [  0,  0.0, -21 ],  //  0  North
         [  9,  0.0, -18 ],  //  1  NNE

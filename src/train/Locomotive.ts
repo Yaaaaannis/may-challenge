@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
-import { CurveFn, curvePoint } from '../track/curves.js'
+import { CurveFn, curvePoint, curveTangent } from '../track/curves.js'
 
 const TRAIN_SCALE = 0.28
 const TRAIN_Y = 0.36   // hauteur centre de la loco au-dessus du sol
@@ -98,10 +98,29 @@ export class Locomotive {
   update(fn: CurveFn, t: number, wheelRot = 0) {
     if (!this.loaded) return
 
-    const pos   = curvePoint(fn, t, TRAIN_Y)
-    const ahead = curvePoint(fn, t + 0.001, TRAIN_Y)
+    // Looping : courbure verticale (haut/bas du cercle) OU tangente quasi-verticale (côtés).
+    // Le guard dLen > 0.04 évite de déclencher sur une rampe droite sans courbure.
+    const DT    = 0.004
+    const tangA = curveTangent(fn, t)
+    const dTang = curveTangent(fn, t + DT).sub(tangA.clone())
+    const dLen  = dTang.length()
+    const inLoop = dLen > 0.04 && (
+      Math.abs(dTang.y) / dLen > 0.5 ||   // haut/bas : centripète vertical
+      Math.abs(tangA.y) > 0.45             // côtés : tangente quasi-verticale
+    )
+
+    // Offset TRAIN_Y dans la direction centripète pour les loops,
+    // sinon en Y monde → évite que le train s'enfonce dans le rail au sommet
+    const base  = curvePoint(fn, t, 0)
+    const upDir = inLoop ? dTang.normalize() : new THREE.Vector3(0, 1, 0)
+    const pos   = base.clone().addScaledVector(upDir, TRAIN_Y)
+
+    const baseAhead  = curvePoint(fn, t + 0.001, 0)
+    const upDirAhead = inLoop ? dTang.normalize() : new THREE.Vector3(0, 1, 0)
+    const ahead = baseAhead.clone().addScaledVector(upDirAhead, TRAIN_Y)
 
     this.group.position.copy(pos)
+    this.group.up.copy(upDir)
     this.group.lookAt(ahead)
 
     // Rotation des roues proportionnelle à la distance parcourue

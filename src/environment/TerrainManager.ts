@@ -66,19 +66,7 @@ export class TerrainManager {
     const pos = this._geo.attributes['position'] as THREE.BufferAttribute
 
     for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i)
-      const z = pos.getZ(i)
-      const r = Math.sqrt(x * x + z * z)
-
-      const h = noise2(x * 0.055, z * 0.055) * 0.55
-              + noise2(x * 0.130, z * 0.130) * 0.30
-              + noise2(x * 0.260, z * 0.260) * 0.10
-              + noise2(x * 0.520, z * 0.520) * 0.05
-
-      const blend = THREE.MathUtils.smoothstep(this._flatR, this._hillR, r)
-      const bowl  = Math.max(0, (r - this._flatR) * 0.04)
-
-      pos.setY(i, (h * blend + bowl) * this._maxH)
+      pos.setY(i, 0)
     }
 
     this._geo.computeVertexNormals()

@@ -18,9 +18,10 @@ export interface PanelCallbacks {
   onSeason:   (id: string) => void
   onTunnel:   (active: boolean) => void
   onBridge:   (active: boolean) => void
-  onShare?:    () => void
-  onBrowse?:   () => void
-  onTrainCam?: () => void
+  onShare?:       () => void
+  onBrowse?:      () => void
+  onTrainCam?:    () => void
+  onAutoToggle?:  () => void
 }
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -125,6 +126,7 @@ export class Panel {
   private tunnelBtn!:    HTMLButtonElement
   private bridgeBtn!:    HTMLButtonElement
   private trainCamBtn!:  HTMLButtonElement
+  private autoBtn!:      HTMLButtonElement
   private _collapsed = false
 
   constructor(private callbacks: PanelCallbacks) {
@@ -144,6 +146,7 @@ export class Panel {
     this.tunnelBtn   = this.el.querySelector('[data-tunnel]')!
     this.bridgeBtn   = this.el.querySelector('[data-bridge]')!
     this.trainCamBtn = this.el.querySelector('[data-traincam]')!
+    this.autoBtn     = this.el.querySelector('[data-auto]')!
     this._bindEvents()
     document.body.appendChild(this.el)
   }
@@ -246,6 +249,17 @@ export class Panel {
             <path d="M11 6.5 L15 4.5 L15 11.5 L11 9.5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
           </svg>
           <span>Vue Train</span>
+        </button>
+        <button class="tp-mode-btn" data-auto style="--c:#06d6a0;--ct:#0a2a1a" title="Pilote automatique — vitesse adaptée au circuit">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="8" cy="8" r="2" fill="currentColor"/>
+            <line x1="8" y1="2" x2="8" y2="4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="14" y1="8" x2="11.5" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="8" y1="14" x2="8" y2="11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="2" y1="8" x2="4.5" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span>Auto</span>
         </button>
       </section>
 
@@ -414,6 +428,10 @@ export class Panel {
 
     q('[data-traincam]')!.addEventListener('click', () => {
       this.callbacks.onTrainCam?.()
+    })
+
+    q('[data-auto]')!.addEventListener('click', () => {
+      this.callbacks.onAutoToggle?.()
     })
 
     // Collapse toggle
@@ -754,6 +772,10 @@ export class Panel {
 
   setTrainCamActive(active: boolean) {
     this.trainCamBtn.classList.toggle('active', active)
+  }
+
+  setAutoActive(active: boolean) {
+    this.autoBtn.classList.toggle('active', active)
   }
 
   setPaused(paused: boolean) {

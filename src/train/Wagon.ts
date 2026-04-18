@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { CurveFn, curvePoint } from '../track/curves.js'
+import { CurveFn, curvePoint, curveTangent } from '../track/curves.js'
 
 // ── Dimensions ────────────────────────────────────────────────────────────────
 
@@ -315,10 +315,21 @@ export class Wagon {
   // ── Per-frame update ───────────────────────────────────────────────────────
 
   update(fn: CurveFn, t: number, wheelRot: number) {
-    const pos   = curvePoint(fn, t, WAGON_Y)
-    const ahead = curvePoint(fn, t + 0.001, WAGON_Y)
+    const DT    = 0.004
+    const tangA = curveTangent(fn, t)
+    const dTang = curveTangent(fn, t + DT).sub(tangA.clone())
+    const dLen  = dTang.length()
+    const inLoop = dLen > 0.04 && (
+      Math.abs(dTang.y) / dLen > 0.5 ||
+      Math.abs(tangA.y) > 0.45
+    )
+    const upDir = inLoop ? dTang.normalize() : new THREE.Vector3(0, 1, 0)
+
+    const pos   = curvePoint(fn, t, 0).addScaledVector(upDir, WAGON_Y)
+    const ahead = curvePoint(fn, t + 0.001, 0).addScaledVector(upDir, WAGON_Y)
 
     this.group.position.copy(pos)
+    this.group.up.copy(upDir)
     this.group.lookAt(ahead)
 
     for (const sg of this.spinGroups) {

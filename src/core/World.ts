@@ -25,6 +25,7 @@ import { DebugConsole } from '../ui/DebugConsole.js'
 import { Minimap } from '../ui/Minimap.js'
 import { SpeedGauge } from '../ui/SpeedGauge.js'
 import { StationManager } from '../environment/StationManager.js'
+import { CloudSystem } from '../environment/CloudSystem.js'
 import { ScoreBoard } from '../ui/ScoreBoard.js'
 import { ShareModal } from '../ui/ShareModal.js'
 import { BrowseModal } from '../ui/BrowseModal.js'
@@ -70,6 +71,7 @@ export class World {
   private shareModal!:  ShareModal
   private browseModal!: BrowseModal
   private trainCam!:    TrainCam
+  private clouds!:      CloudSystem
 
   // Derail risk metrics — updated every tick by _checkCentrifugalDerail
   private _derailRisk    = 0
@@ -83,6 +85,7 @@ export class World {
   private _trainCamActive  = false
   private _inLoopPhase     = false   // détection looping en cours
   private _prevLoopTangY   = 0       // tang.y frame précédente
+  private _autoMode        = false
   private editor:   TrackEditor | null = null
 
   // Switch raycasting
@@ -162,8 +165,8 @@ export class World {
     this.engine.scene.add(this.terrain.mesh)
 
     // ── Lights ────────────────────────────────────────────────────────────────
-    this.ambient = new THREE.AmbientLight(0xffffff, 0.5)
-    this.sun     = new THREE.DirectionalLight(0xffffff, 1.2)
+    this.ambient = new THREE.AmbientLight(0xffffff, 1.2)
+    this.sun     = new THREE.DirectionalLight(0xffffff, 0.5)  // faible — juste pour les ombres
     this.sun.position.set(10, 22, 10)
     this.sun.castShadow = true
     this.sun.shadow.mapSize.setScalar(2048)
@@ -178,6 +181,7 @@ export class World {
 
     // ── Sky (Rayleigh scattering) ──────────────────────────────────────────────
     this.sky = new SkyManager(this.engine.scene)
+    this.clouds = new CloudSystem(this.engine.scene)
 
     this.dayNight = new DayNight(this.engine.scene)
     this.lamps    = new LampPosts(this.engine.scene)
@@ -256,6 +260,7 @@ export class World {
       onShare:        () => this._shareCircuit(),
       onBrowse:       () => { this.engine.controls.enabled = false; this.input.setEnabled(false); this.browseModal.open() },
       onTrainCam:     () => this._toggleTrainCam(),
+      onAutoToggle:   () => this._toggleAuto(),
     })
   }
 
@@ -286,6 +291,7 @@ export class World {
       this.physics.step()
       this.derail?.update()
       this.signals.update(dt)
+      if (this._autoMode) this._tickAutoMode()
       const signalBrake    = this.signals.getSpeedFactor(this.train.t)
       const stationBrake   = this.stations.brakeFactor
       const emergencyBrake = this.speedGauge.braking ? 0.0 : 1.0
@@ -305,6 +311,7 @@ export class World {
       this.smoke.update(dt, this._locoPos, this.train.speed, chimneyPos, repellers)
       if (this._trainCamActive) this.trainCam.update(this.train.locomotive.group)
       if (this._bridgeActive) this.bridge.update(dt)
+      this.clouds.update(dt)
 
       // ── Shadow camera follows the train ──────────────────────────────────
       const tp = this._locoPos
@@ -459,7 +466,7 @@ export class World {
     this.stations.setNightMode(night)
     this.sky.setNight(night)
     // Bloom brighter at night — signals and lamps glow more
-    this.engine.setBloom(night ? 0.3 : 0.1, night ? 0.68 : 0.76)
+    this.clouds.setVisible(!night)
   }
 
   private _toggleFist() {
@@ -499,8 +506,15 @@ export class World {
   }
 
   private _reset() {
-    this.train.reset()
+    if (this._autoMode) this._toggleAuto()
     this.derail?.clear(this.engine.scene)
+    this.train.reset()
+    // derail.clear() retire les groupes de la scène — on les remet
+    const locoGroup = this.train.locomotive.group
+    if (!locoGroup.parent) this.engine.scene.add(locoGroup)
+    for (const wagon of this.train.allWagons) {
+      if (!wagon.group.parent) this.engine.scene.add(wagon.group)
+    }
     if (this.fist?.active)  this._toggleFist()
     if (this.grab?.active)  this._toggleGrab()
     if (this.paused)        this._togglePause()
@@ -573,31 +587,19 @@ export class World {
 
   private _buildDebugConsole() {
     this.debug = new DebugConsole({
-      // Post-process
-      onBloomStrength:  v => { this._bloomStrength  = v; this.engine.setBloom(v, this._bloomThreshold) },
-      onBloomThreshold: v => { this._bloomThreshold = v; this.engine.setBloom(this._bloomStrength, v)  },
-      onBloomRadius:    v => this.engine.setBloomRadius(v),
-      onExposure:       v => this.engine.setExposure(v),
+      onAmbientIntensity: v => { this.ambient.intensity = v },
       // Sky
-      onSkyTurbidity:   v => { this._skyT   = v; this.sky.setFullParams(v, this._skyR, this._skyMie, this._skyMieG) },
-      onSkyRayleigh:    v => { this._skyR   = v; this.sky.setFullParams(this._skyT, v, this._skyMie, this._skyMieG) },
-      onSkyMie:         v => { this._skyMie  = v; this.sky.setFullParams(this._skyT, this._skyR, v, this._skyMieG) },
-      onSkyMieG:        v => { this._skyMieG = v; this.sky.setFullParams(this._skyT, this._skyR, this._skyMie, v) },
-      onSunElevation:   v => this.sky.setSunElevation(v),
-      // Water (passed through BridgeManager)
-      onWaveSpeed:      v => this.bridge.setWaveSpeed(v),
-      onWaveAmplitude:  v => this.bridge.setWaveAmplitude(v),
-      onWaterDeep:      v => this.bridge.setWaterDeep(v),
-      onWaterShallow:   v => this.bridge.setWaterShallow(v),
-      onWaterFoam:      v => this.bridge.setWaterFoam(v),
-      // Terrain
-      onTerrainMaxH:    v => { this._dbgTerrainMaxH  = v },
-      onTerrainFlatR:   v => { this._dbgTerrainFlatR = v },
-      onTerrainHillR:   v => { this._dbgTerrainHillR = v },
-      onTerrainRebuild: () => this.terrain.rebuild(this._dbgTerrainMaxH, this._dbgTerrainFlatR, this._dbgTerrainHillR),
-      // Fog
-      onFogNear: v => { if (this.engine.scene.fog instanceof THREE.Fog) this.engine.scene.fog.near = v },
-      onFogFar:  v => { if (this.engine.scene.fog instanceof THREE.Fog) this.engine.scene.fog.far  = v },
+      onSkyTurbidity:  v => { this._skyT    = v; this.sky.setFullParams(v, this._skyR, this._skyMie, this._skyMieG) },
+      onSkyRayleigh:   v => { this._skyR    = v; this.sky.setFullParams(this._skyT, v, this._skyMie, this._skyMieG) },
+      onSkyMie:        v => { this._skyMie  = v; this.sky.setFullParams(this._skyT, this._skyR, v, this._skyMieG) },
+      onSkyMieG:       v => { this._skyMieG = v; this.sky.setFullParams(this._skyT, this._skyR, this._skyMie, v) },
+      onSunElevation:  v => this.sky.setSunElevation(v),
+      // Water
+      onWaveSpeed:     v => this.bridge.setWaveSpeed(v),
+      onWaveAmplitude: v => this.bridge.setWaveAmplitude(v),
+      onWaterDeep:     v => this.bridge.setWaterDeep(v),
+      onWaterShallow:  v => this.bridge.setWaterShallow(v),
+      onWaterFoam:     v => this.bridge.setWaterFoam(v),
       // Smoke
       onSmokeRate: v => this.smoke.setEmissionRate(v),
       onSmokeRise: v => this.smoke.setRiseSpeed(v),
@@ -608,9 +610,6 @@ export class World {
     })
   }
 
-  // Cached params for delta-style debug updates
-  private _bloomStrength  = 0.1
-  private _bloomThreshold = 0.76
   private _skyT    = 2.5
   private _skyR    = 3.0
   private _skyMie  = 0.003
@@ -823,6 +822,73 @@ export class World {
     this._prevLoopTangY = tang.y
   }
 
+  private _toggleAuto() {
+    this._autoMode = !this._autoMode
+    this.panel.setAutoActive(this._autoMode)
+  }
+
+  private _tickAutoMode() {
+    const table = this.train.arcTable
+    if (!table) return
+
+    const fn  = this.track.curveFn
+    const t   = this.train.t
+
+    // ── Scan du circuit devant le train ────────────────────────────────────
+    // Cherche (a) la vitesse max sûre sur les courbes horizontales
+    //         (b) si un looping est présent dans les prochains mètres
+    const STEPS     = 24          // points d'échantillonnage
+    const LOOK_T    = 0.18        // horizon de prédiction en t (≈ ~15–20 unités)
+    const DT        = 0.005       // delta pour le calcul de courbure
+
+    const BASE_THRESHOLD  = 8.0
+    const massMultiplier  = 1 + this.train.wagonsCount * 0.10
+
+    let minSafeWorldSpeed = Infinity
+    let loopAhead         = false
+
+    for (let i = 1; i <= STEPS; i++) {
+      const tScan = (t + LOOK_T * (i / STEPS)) % 1
+
+      const tA = curveTangent(fn, tScan)
+      const tB = curveTangent(fn, tScan + DT)
+
+      // Détection looping : courbure principalement verticale
+      const dtY  = tB.y - tA.y
+      const dtLen = tA.distanceTo(tB)
+      const isVertCurv = dtLen > 0.0001 && Math.abs(dtY) > dtLen * 0.40
+      if (isVertCurv || Math.abs(tA.y) > 0.18) {
+        loopAhead = true
+        continue   // pas de limite de vitesse max sur un loop
+      }
+
+      // Courbure horizontale → vitesse max sûre
+      const curveAngle = tA.angleTo(tB) / DT
+      const kappa      = curveAngle / table.total
+      if (kappa > 0.001) {
+        const threshold      = BASE_THRESHOLD / massMultiplier
+        const safeWorldSpeed = Math.sqrt(threshold / kappa)
+        if (safeWorldSpeed < minSafeWorldSpeed) minSafeWorldSpeed = safeWorldSpeed
+      }
+    }
+
+    // ── Calcul de la vitesse cible ─────────────────────────────────────────
+    // Convertit la vitesse monde en t/s
+    const safeT = minSafeWorldSpeed < Infinity
+      ? (minSafeWorldSpeed / table.total) * 2 * Math.PI * 0.82   // marge 18 %
+      : SPEED_MAX
+
+    const MIN_LOOP_T = 0.75   // vitesse minimale garantie pour franchir un looping
+
+    let target = Math.min(safeT, SPEED_MAX)
+    if (loopAhead) target = Math.max(target, MIN_LOOP_T)
+    target = Math.max(target, SPEED_MIN)
+
+    this.train.speed = target
+    this.panel.setSpeed(target)
+    this.speedGauge?.setLeverSpeed(target)
+  }
+
   private _toggleTrainCam() {
     this._trainCamActive = !this._trainCamActive
     this.panel.setTrainCamActive(this._trainCamActive)
@@ -866,5 +932,6 @@ export class World {
     this.shareModal.dispose()
     this.browseModal.dispose()
     this.trainCam.dispose()
+    this.clouds.dispose()
   }
 }

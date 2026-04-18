@@ -2,11 +2,8 @@
 // Panneau de debug en haut à gauche pour régler tous les paramètres visuels.
 
 export interface DebugCallbacks {
-  // Post-processing
-  onBloomStrength:   (v: number) => void
-  onBloomThreshold:  (v: number) => void
-  onBloomRadius:     (v: number) => void
-  onExposure:        (v: number) => void
+  // Lumière
+  onAmbientIntensity: (v: number) => void
   // Sky
   onSkyTurbidity:    (v: number) => void
   onSkyRayleigh:     (v: number) => void
@@ -19,14 +16,6 @@ export interface DebugCallbacks {
   onWaterDeep:       (hex: number) => void
   onWaterShallow:    (hex: number) => void
   onWaterFoam:       (hex: number) => void
-  // Terrain
-  onTerrainMaxH:     (v: number) => void
-  onTerrainFlatR:    (v: number) => void
-  onTerrainHillR:    (v: number) => void
-  onTerrainRebuild:  () => void
-  // Fog
-  onFogNear:         (v: number) => void
-  onFogFar:          (v: number) => void
   // Smoke
   onSmokeRate:       (v: number) => void
   onSmokeRise:       (v: number) => void
@@ -86,51 +75,36 @@ export class DebugConsole {
   }
 
   private _buildSections() {
-    // ── Bloom ────────────────────────────────────────────────────────────────
-    const bloom = this._section('🌸 Post-Process', '#c084fc', true)
-    this._slider(bloom, 'Bloom strength',   0, 2,   0.01, 0.1,  v => this.cb.onBloomStrength(v))
-    this._slider(bloom, 'Bloom threshold',  0, 1,   0.01, 0.76, v => this.cb.onBloomThreshold(v))
-    this._slider(bloom, 'Bloom radius',     0, 1,   0.01, 0.55, v => this.cb.onBloomRadius(v))
-    this._slider(bloom, 'Exposure',         0.1, 3, 0.01, 1.0,  v => this.cb.onExposure(v))
+    // ── Lumière ──────────────────────────────────────────────────────────────
+    const light = this._section('💡 Lumière', '#fbbf24', false)
+    this._slider(light, 'Ambiant',  0, 3, 0.05, 1.2, v => this.cb.onAmbientIntensity(v))
 
     // ── Ciel ─────────────────────────────────────────────────────────────────
     const sky = this._section('☁️ Ciel (Rayleigh)', '#38bdf8', true)
-    this._slider(sky, 'Turbidité',     0,  22,  0.1,  2.5,  v => this.cb.onSkyTurbidity(v))
-    this._slider(sky, 'Rayleigh',      0,  4,   0.05, 3.0,  v => this.cb.onSkyRayleigh(v))
-    this._slider(sky, 'Mie coeff',     0,  0.1, 0.001,0.003,v => this.cb.onSkyMie(v))
-    this._slider(sky, 'Mie G',         0,  1,   0.01, 0.86, v => this.cb.onSkyMieG(v))
-    this._slider(sky, 'Soleil élév.',  0,  1,   0.01, 0.55, v => this.cb.onSunElevation(v))
+    this._slider(sky, 'Turbidité',    0,   22,  0.1,   2.5,  v => this.cb.onSkyTurbidity(v))
+    this._slider(sky, 'Rayleigh',     0,   4,   0.05,  3.0,  v => this.cb.onSkyRayleigh(v))
+    this._slider(sky, 'Mie coeff',    0,   0.1, 0.001, 0.003,v => this.cb.onSkyMie(v))
+    this._slider(sky, 'Mie G',        0,   1,   0.01,  0.86, v => this.cb.onSkyMieG(v))
+    this._slider(sky, 'Soleil élév.', 0,   1,   0.01,  0.55, v => this.cb.onSunElevation(v))
 
     // ── Eau ──────────────────────────────────────────────────────────────────
     const water = this._section('💧 Eau', '#0ea5e9', true)
-    this._slider(water, 'Vitesse vagues',    0.1, 4, 0.05, 1.0,  v => this.cb.onWaveSpeed(v))
-    this._slider(water, 'Amplitude vagues',  0.1, 3, 0.05, 1.0,  v => this.cb.onWaveAmplitude(v))
-    this._color(water,  'Profond',   0x0d4a66, v => this.cb.onWaterDeep(v))
-    this._color(water,  'Surface',   0x2a8aaa, v => this.cb.onWaterShallow(v))
-    this._color(water,  'Écume',     0xb8dde8, v => this.cb.onWaterFoam(v))
-
-    // ── Terrain ──────────────────────────────────────────────────────────────
-    const terrain = this._section('🏔️ Terrain', '#84cc16', true)
-    this._slider(terrain, 'Hauteur max',   0.5, 8,  0.1, 3.2,  v => this.cb.onTerrainMaxH(v))
-    this._slider(terrain, 'Zone plate (r)',2,   15, 0.5, 9.5,  v => this.cb.onTerrainFlatR(v))
-    this._slider(terrain, 'Collines (r)',  8,   28, 0.5, 18.0, v => this.cb.onTerrainHillR(v))
-    this._button(terrain, '↺ Reconstruire', () => this.cb.onTerrainRebuild())
-
-    // ── Atmosphère ───────────────────────────────────────────────────────────
-    const fog = this._section('🌫 Atmosphère', '#94a3b8', true)
-    this._slider(fog, 'Brouillard near', 1,  30, 0.5, 25,  v => this.cb.onFogNear(v))
-    this._slider(fog, 'Brouillard far',  10, 80, 1,   65,  v => this.cb.onFogFar(v))
+    this._slider(water, 'Vitesse vagues',   0.1, 4, 0.05, 1.0, v => this.cb.onWaveSpeed(v))
+    this._slider(water, 'Amplitude vagues', 0.1, 3, 0.05, 1.0, v => this.cb.onWaveAmplitude(v))
+    this._color(water,  'Profond',  0x0d4a66, v => this.cb.onWaterDeep(v))
+    this._color(water,  'Surface',  0x2a8aaa, v => this.cb.onWaterShallow(v))
+    this._color(water,  'Écume',    0xb8dde8, v => this.cb.onWaterFoam(v))
 
     // ── Fumée ────────────────────────────────────────────────────────────────
     const smoke = this._section('💨 Fumée', '#a8a29e', true)
-    this._slider(smoke, 'Émission',  0, 4,   0.05, 1.0, v => this.cb.onSmokeRate(v))
-    this._slider(smoke, 'Montée',    0.2, 3, 0.05, 1.0, v => this.cb.onSmokeRise(v))
-    this._slider(smoke, 'Taille',    0.2, 3, 0.05, 1.0, v => this.cb.onSmokeSize(v))
+    this._slider(smoke, 'Émission', 0,   4,   0.05, 1.0, v => this.cb.onSmokeRate(v))
+    this._slider(smoke, 'Montée',   0.2, 3,   0.05, 1.0, v => this.cb.onSmokeRise(v))
+    this._slider(smoke, 'Taille',   0.2, 3,   0.05, 1.0, v => this.cb.onSmokeSize(v))
 
     // ── Météo ────────────────────────────────────────────────────────────────
     const rain = this._section('🌧 Pluie', '#60a5fa', true)
-    this._slider(rain, 'Vitesse chute', 5,  50, 0.5, 22,  v => this.cb.onRainSpeed(v))
-    this._slider(rain, 'Opacité',       0,  1,  0.01,0.5, v => this.cb.onRainOpacity(v))
+    this._slider(rain, 'Vitesse chute', 5,  50, 0.5,  22,  v => this.cb.onRainSpeed(v))
+    this._slider(rain, 'Opacité',       0,  1,  0.01, 0.5, v => this.cb.onRainOpacity(v))
   }
 
   // ── Section helpers ───────────────────────────────────────────────────────

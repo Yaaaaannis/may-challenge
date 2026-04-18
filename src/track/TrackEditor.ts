@@ -5,7 +5,7 @@ import { CurveFn, findNearestT, curvePoint } from './curves.js'
 
 const STRAIGHT_LEN  = 2.5
 const CURVE_RADIUS  = 2.5
-const LOOP_RADIUS   = 2.5             // radius of loop-the-loop circle
+const LOOP_RADIUS   = 4.0             // radius of loop-the-loop circle
 const CURVE_DTHETA  = Math.PI / 2     // virages à 90°
 const DIR_COUNT     = 4               // 0=+X  1=+Z  2=-X  3=-Z
 const CLOSE_DIST    = 0.3

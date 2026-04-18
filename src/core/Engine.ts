@@ -1,9 +1,5 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
 export class Engine {
   readonly renderer: THREE.WebGLRenderer
@@ -15,9 +11,7 @@ export class Engine {
   private _onPostRender:  ((renderer: THREE.WebGLRenderer, scene: THREE.Scene) => void) | null = null
   private _lastTime = 0
   private _rafId = 0
-  private _composer:   EffectComposer
-  private _renderPass: RenderPass
-  private _bloom:      UnrealBloomPass
+  private _activeCamera: THREE.PerspectiveCamera | null = null
 
   constructor() {
     // Renderer
@@ -26,14 +20,14 @@ export class Engine {
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMapping = THREE.LinearToneMapping   // couleurs vives et saturées, style cartoon
     this.renderer.toneMappingExposure = 1.0
     document.body.appendChild(this.renderer.domElement)
 
     // Scene
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x87ceeb)
-    this.scene.fog = new THREE.Fog(0x87ceeb, 20, 60)
+    this.scene.fog = new THREE.Fog(0x87ceeb, 60, 120)  // brouillard très lointain, quasi invisible
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(
@@ -52,30 +46,10 @@ export class Engine {
     this.controls.minDistance = 4
     this.controls.maxDistance = 40
 
-    // ── Post-processing ───────────────────────────────────────────────────────
-    this._composer = new EffectComposer(this.renderer)
-    this._renderPass = new RenderPass(this.scene, this.camera)
-    this._composer.addPass(this._renderPass)
-
-    this._bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.1,    // strength
-      0.55,   // radius
-      0.76,   // threshold — only very bright emissives bloom
-    )
-    this._composer.addPass(this._bloom)
-    this._composer.addPass(new OutputPass())
-
     window.addEventListener('resize', this._onResize)
   }
 
-  /** Adjust bloom dynamically (e.g. brighter at night). */
-  setBloom(strength: number, threshold = 0.76) {
-    this._bloom.strength  = strength
-    this._bloom.threshold = threshold
-  }
-  setBloomRadius(v: number)   { this._bloom.radius = v }
-  setExposure(v: number)      { this.renderer.toneMappingExposure = v }
+  setExposure(v: number) { this.renderer.toneMappingExposure = v }
 
   /** Register the per-frame callback (dt in seconds). */
   setTickCallback(fn: (dt: number) => void) {
@@ -87,9 +61,9 @@ export class Engine {
     this._onPostRender = fn
   }
 
-  /** Remplace la caméra utilisée par le composer. Passer null pour revenir à la caméra principale. */
+  /** Remplace la caméra active. Passer null pour revenir à la caméra principale. */
   setActiveCamera(cam: THREE.PerspectiveCamera | null) {
-    this._renderPass.camera = cam ?? this.camera
+    this._activeCamera = cam
   }
 
   /** Remet la caméra principale à sa position de départ. */
@@ -114,7 +88,7 @@ export class Engine {
 
     this.controls.update()
     this._onTick?.(dt)
-    this._composer.render()
+    this.renderer.render(this.scene, this._activeCamera ?? this.camera)
     this._onPostRender?.(this.renderer, this.scene)
   }
 
@@ -145,7 +119,6 @@ export class Engine {
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(window.innerWidth, window.innerHeight)
-    this._composer.setSize(window.innerWidth, window.innerHeight)
   }
 
   dispose() {
